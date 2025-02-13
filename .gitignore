@@ -1,0 +1,15 @@
+# Ignore environment variable files (API keys, secrets)
+.env
+.env.local
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environment directories (if any)
+venv/
+env/
+
+# Ignore logs and output files
+*.log
+output.md
