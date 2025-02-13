@@ -51,7 +51,7 @@ def o3_mini_model(model_name, **kwargs):
     """
     return model_name
 
-o3_mini_model = o3_mini_model("gpt-3.5-turbo")
+o3_mini_model = o3_mini_model("o3-mini-2025-01-31") #o3-mini-2025-01-31, gpt-3.5-turbo
 
 def system_prompt():
     from prompt import system_prompt as sys_prompt
