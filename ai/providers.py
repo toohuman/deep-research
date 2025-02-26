@@ -1,102 +1,108 @@
-from dotenv import load_dotenv
-load_dotenv('.env.local')
 import os
-import openai
-from openai import ChatCompletion
 import json
-import asyncio
 import httpx
-
-# Retrieve OpenAI API key from environment variables.
-# Try OPENAI_API_KEY first, then fallback to OPENAI_KEY.
-api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY")
-if not api_key or api_key == "sk-dummy-key":
-    raise ValueError("A valid OpenAI API key must be set in the environment variable. Provided key is invalid.")
-
-openai.api_key = api_key
-
-# Instantiate the client with your API key.
+import asyncio
+from dotenv import load_dotenv
 from openai import OpenAI
-client = OpenAI(api_key=api_key)
 
-async def generate_object(*, model, system, prompt, schema):
-    """
-    Calls the OpenAI ChatCompletion API using the new interface.
-    """
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
-    # Use the new client method via asyncio.to_thread to avoid blocking.
-    response = await asyncio.to_thread(client.chat.completions.create, model=model, messages=messages)
-    content = response.choices[0].message.content
-    # If the schema expects a reportMarkdown field, return the raw content.
-    if "reportMarkdown" in schema.get("properties", {}):
-        return {"object": {"reportMarkdown": content}}
-    try:
-        parsed = json.loads(content)
-    except Exception as e:
-        import re
-        # Attempt to extract numbered list segments from the response regardless of leading text.
-        matches = re.findall(r"(?m)^\s*\d+\.\s*(.*)$", content)
-        if matches:
-            parsed = {"questions": [match.strip() for match in matches if match.strip()]}
-        else:
-            raise ValueError(f"Failed to parse response as JSON or extract numbered list items: {e}\nResponse content: {content}")
-    return {"object": parsed}
+# Load environment variables
+load_dotenv('.env.local')
 
-def o3_mini_model(model_name, **kwargs):
-    """
-    Returns the model name. In this implementation, the model identifier is simply a string.
-    """
-    return model_name
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-o3_mini_model = o3_mini_model("o3-mini-2025-01-31") #o3-mini-2025-01-31, gpt-3.5-turbo
+# Model configuration
+o3_mini_model = "o3-mini"
 
 def system_prompt():
-    from prompt import system_prompt as sys_prompt
-    return sys_prompt()
+    """
+    Returns the system prompt from prompt.py
+    This is a stub that will be replaced by the actual implementation
+    """
+    from prompt import system_prompt as actual_system_prompt
+    return actual_system_prompt()
 
-def trim_prompt(prompt, context_size=128000):
-    if len(prompt) <= context_size:
+def trim_prompt(prompt: str, max_length: int = 25000) -> str:
+    """
+    Trims a prompt to a maximum length while preserving whole sentences.
+
+    Args:
+        prompt: The text to trim
+        max_length: Maximum length in characters
+
+    Returns:
+        Trimmed text
+    """
+    if not prompt:
+        return ""
+
+    if len(prompt) <= max_length:
         return prompt
-    return prompt[:context_size]
 
-class FirecrawlApp:
-    def __init__(self, api_key="", api_url=None):
-        self.api_key = api_key or os.getenv("FIRECRAWL_KEY")
-        const_url = os.getenv("FIRECRAWL_BASE_URL")
-        if (not const_url) or const_url.strip() == "":
-            print("Warning: FIRECRAWL_BASE_URL not provided. Using http://localhost:3002 for testing.")
-            self.api_url = "http://localhost:3002"
+    # Try to trim at sentence boundaries
+    sentences = prompt.split('. ')
+    result = ""
+
+    for sentence in sentences:
+        if len(result) + len(sentence) + 2 <= max_length:  # +2 for ". "
+            result += sentence + ". "
         else:
-            self.api_url = api_url or const_url
+            break
 
-    async def search(self, query, timeout, limit, scrapeOptions):
-        """
-        Makes an HTTP GET request to the Firecrawl API endpoint (FIRECRAWL_BASE_URL) to perform a search.
-        If using the default local testing URL, returns a dummy response.
-        """
-        params = {
-            "query": query,
-            "limit": limit,
-            "formats": ",".join(scrapeOptions.get("formats", []))
-        }
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        # If the URL does not start with 'http://' or 'https://', consider it invalid and return a dummy response.
-        if not (self.api_url.startswith("http://") or self.api_url.startswith("https://")):
-            print("Warning: Firecrawl API URL is invalid. Returning dummy search response.")
-            return {"data": []}
-        # If using a local testing URL, return a dummy response.
-        if self.api_url == "dummy":
-            print("Warning: Dummy search response returned.")
-            return {"data": [{"markdown": f"Dummy content for query: {query}", "url": f"http://dummy.com/{query.replace(' ', '_')}" }]}
-        if "localhost" in self.api_url.lower():
-            print("Warning: Dummy search response returned.")
-            return {"data": [{"markdown": f"Dummy content for query: {query}", "url": f"http://dummy.com/{query.replace(' ', '_')}" }]}
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            # Ensure the URL ends with '/search'
-            url = self.api_url if self.api_url.endswith("/search") else f"{self.api_url}/search"
-            response = await client.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            return response.json()
+    return result.strip()
+
+async def generate_object(model, system, prompt, schema):
+    """
+    Generate a structured object using OpenAI.
+
+    Args:
+        model: Model name or identifier
+        system: System prompt
+        prompt: User prompt
+        schema: JSON schema for the response
+
+    Returns:
+        Generated object
+    """
+    try:
+        print(f"generate_object called with prompt length: {len(prompt)}")
+        print(f"Schema: {schema}")
+
+        # Add "json" to the prompt to satisfy the response_format requirement
+        modified_prompt = f"{prompt}\n\nPlease provide your response in JSON format according to the schema. Your response must be valid JSON."
+
+        print("Calling OpenAI API...")
+        response = client.chat.completions.create(
+            model=o3_mini_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": modified_prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+
+        print(f"OpenAI API response received. Status: {response.choices[0].finish_reason}")
+
+        content = response.choices[0].message.content
+        print(f"Response content length: {len(content)}")
+        print(f"Response content preview: {content[:200]}...")
+
+        result = json.loads(content)
+        print(f"JSON parsed successfully. Keys: {list(result.keys())}")
+
+        return {"object": result}
+    except Exception as e:
+        print(f"Error generating object: {e}")
+        print(f"Error type: {type(e)}")
+        # Return a minimal valid object based on the schema
+        if schema and "properties" in schema:
+            minimal_object = {}
+            for key, prop in schema["properties"].items():
+                if prop.get("type") == "string":
+                    minimal_object[key] = "Error generating content"
+                elif prop.get("type") == "array":
+                    minimal_object[key] = []
+                elif prop.get("type") == "object":
+                    minimal_object[key] = {}
+            return {"object": minimal_object}
+        return {"object": {}}

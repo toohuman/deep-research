@@ -13,3 +13,4 @@ env/
 # Ignore logs and output files
 *.log
 output.md
+output/

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
+import os
+from dotenv import load_dotenv
 
 from deep_research import deep_research, write_final_report
 from feedback import generate_feedback
+
+# Load environment variables
+load_dotenv('.env.local')
 
 async def ask_question(prompt: str) -> str:
     """
@@ -54,13 +59,27 @@ async def main():
     def on_progress(progress):
         print(f"Progress: {progress}%")
 
-    # Perform deep research (assumes deep_research supports an on_progress callback)
-    result = await deep_research(query=combined_query, breadth=breadth, depth=depth)
+    # Perform deep research
+    try:
+        result = await deep_research(query=combined_query, breadth=breadth, depth=depth)
+        print("\nResearch completed successfully.")
+    except Exception as e:
+        print(f"\nError during research: {e}")
+        # Provide a minimal result to continue
+        result = {"learnings": [], "visitedUrls": []}
     learnings = result.get("learnings", [])
     visited_urls = result.get("visitedUrls", [])
 
     print("\n\nLearnings:\n")
-    print("\n".join(learnings))
+    for learning in learnings:
+        if isinstance(learning, dict):
+            if 'title' in learning and ('details' in learning or 'description' in learning):
+                details = learning.get('details', learning.get('description', ''))
+                print(f"- {learning['title']}: {details[:100]}...")
+            else:
+                print(f"- {str(learning)[:150]}...")
+        else:
+            print(f"- {learning}")
     print(f"\n\nVisited URLs ({len(visited_urls)}):\n")
     print("\n".join(visited_urls))
     print("Writing final report...")
